@@ -36,7 +36,46 @@ A local-first, voice-activated personal assistant with long-term memory, schedul
 
 ---
 
-## Setup
+## Setup — Windows (press-and-forget installer)
+
+> **Requires Windows 10 1809+ or Windows 11** (winget must be available).
+
+```powershell
+# 1. Open PowerShell in the JarvisLT folder and run:
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The installer will:
+1. Install Python 3.10, Node.js, and Docker Desktop via `winget`
+2. Run `pipenv install`
+3. Prompt for API keys and write `.env`
+4. Start all Docker containers
+5. Install Playwright Chromium
+6. Open a browser for one-time Google OAuth (Gmail/Calendar)
+
+**If Docker Desktop triggers a reboot**, re-run with:
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -SkipPrereqs
+```
+
+Once setup is complete, **double-click `start.bat`** to launch Jarvis.
+
+**Flags:**
+
+| Flag | Effect |
+|---|---|
+| `-SkipPrereqs` | Skip winget installs (Python/Node/Docker already installed) |
+| `-SkipDocker` | Skip Docker startup and `docker compose up` |
+| `-SkipOAuth` | Skip Google OAuth step (run `pipenv run python auth_google.py` later) |
+
+**Windows troubleshooting:**
+- *No microphone input* → Windows Settings → Privacy & Security → Microphone → allow access
+- *Docker not found after install* → reboot required, then re-run with `-SkipPrereqs`
+- *MCP server errors* → run `pipenv run python main.py` from the JarvisLT folder (not from another directory)
+
+---
+
+## Setup — Linux / macOS
 
 ### 1. Clone and install
 
@@ -45,6 +84,9 @@ git clone git@github.com:vitalij555/JarvisLT.git
 cd JarvisLT
 pipenv install
 ```
+
+> **macOS only:** if `sounddevice` fails, run `brew install portaudio` first.
+> Also grant microphone access: System Preferences → Privacy & Security → Microphone.
 
 ### 2. Environment variables
 
