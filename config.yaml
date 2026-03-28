@@ -137,7 +137,7 @@ task_db:
 dev_team:
   enabled: true
   worker_timeout: 600       # seconds per CLI worker call (architects/devs may need time)
-  max_retries: 3            # PM retry budget when tests fail
+  max_retries: 4            # test-fix iterations before declaring failure
   db_path: "jarvis_tasks.db"
 
 # IT Outsourcing Department — autonomous job scanning and proposal pipeline
