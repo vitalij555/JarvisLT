@@ -9,10 +9,12 @@ A local-first, voice-activated personal assistant with long-term memory, schedul
 | Capability | How |
 |---|---|
 | Wake word detection | `hey_jarvis` via wyoming-openwakeword |
-| Speech-to-text | wyoming-faster-whisper (local) |
-| Text-to-speech | speaches (Kokoro-82M, local) |
+| Speech-to-text | wyoming-faster-whisper (local, multilingual auto-detect) |
+| Text-to-speech | speaches (Kokoro-82M, local) + edge-tts for Lithuanian/Polish/Russian |
+| Multilingual support | Automatic language detection — reads Lithuanian, Polish, Russian natively |
 | LLM reasoning | OpenAI gpt-4o with full tool-use loop |
-| Short-term memory | Sliding JSON window (last 20 turns) |
+| Multi-turn conversations | Stays active after each response (60s follow-up window, no wake word needed) |
+| Short-term memory | Sliding JSON window (last 20 turns, persists across restarts) |
 | Long-term entity memory | Neo4j graph (people, events, preferences, relationships) |
 | Semantic search | ChromaDB with local embeddings (all-MiniLM-L6-v2) |
 | Scheduled tasks | APScheduler — cron or interval, defined in config or by voice |
@@ -64,9 +66,11 @@ docker compose up -d
 
 This starts:
 - **speaches** — TTS on port 8000
-- **wyoming-whisper** — STT on port 10300
+- **wyoming-whisper** — STT on port 10300 (multilingual, auto language detect)
 - **wyoming-openwakeword** — wake word on port 10400
 - **neo4j** — graph memory on ports 7474 (browser) and 7687 (Bolt)
+
+> **Note:** On first start, wyoming-whisper downloads the `small-int8` Whisper model (~500 MB). This is a one-time download.
 
 ### 4. Install Playwright browsers
 
@@ -74,10 +78,11 @@ Required for web crawling and the @playwright/mcp server:
 
 ```bash
 # For crawl4ai (Python)
-crawl4ai-setup
+pipenv run crawl4ai-setup
+# If the above fails on sudo, run manually:
+pipenv run python -m playwright install chromium
 
-# For @playwright/mcp (Node)
-npx playwright install chromium
+# For @playwright/mcp (Node) — no pre-install needed, npx fetches on demand
 ```
 
 ### 5. Google OAuth (for Gmail/Calendar MCP)
@@ -98,9 +103,61 @@ Say **"Hey Jarvis"** to activate.
 
 ---
 
+## Conversation Flow
+
+```
+"Hey Jarvis"  →  Jarvis: "Yes?"  →  [speak your command]
+                                          ↓
+                                    Jarvis responds
+                                          ↓
+                               [60-second follow-up window]
+                              ┌───────────────────────────┐
+                              │  Speak follow-up → Jarvis │
+                              │  responds → 60s window    │  ← repeats
+                              └───────────────────────────┘
+                                          ↓ (silence for 60s)
+                              Jarvis: "Going to sleep. Say 'Hey Jarvis'..."
+```
+
+No need to repeat the wake word for follow-up questions. Jarvis maintains full conversation context across turns within a session and across restarts (last 20 turns persisted to JSON).
+
+---
+
+## Multilingual Support
+
+Jarvis automatically detects the language of text and selects the appropriate voice:
+
+| Language | STT | TTS Engine | Default Voice |
+|---|---|---|---|
+| English | Whisper auto | speaches / Kokoro-82M | `af_heart` |
+| Lithuanian | Whisper auto | edge-tts | `lt-LT-OnaNeural` |
+| Polish | Whisper auto | edge-tts | `pl-PL-ZofiaNeural` |
+| Russian | Whisper auto | edge-tts | `ru-RU-SvetlanaNeural` |
+
+You can mix languages naturally:
+- *"Find the last email called Penktadienio laiškas"* — Whisper transcribes the mixed input; Gmail is queried correctly.
+- Emails written in Lithuanian are read back with a Lithuanian voice automatically.
+
+To change voices, edit `multilingual_voices` in `config.yaml`. List available voices:
+```bash
+python -m edge_tts --list-voices | grep -E "^lt|^pl|^ru"
+```
+
+---
+
 ## Configuration
 
 All configuration lives in `config.yaml`. No code changes are needed to add MCP servers, change TTS voice, or define scheduled tasks.
+
+### Key audio settings
+
+```yaml
+audio:
+  silence_threshold: 100    # RMS sensitivity — lower = picks up quieter voices
+  silence_duration: 1.5     # seconds of silence to end speech capture
+  speech_timeout: 8.0       # seconds to wait after "Yes?" before giving up
+  conversation_timeout: 60.0 # seconds to wait for follow-up before going to sleep
+```
 
 ### Adding a scheduled task (static)
 
@@ -134,6 +191,15 @@ Jarvis discovers all tools from the server automatically on startup.
 ---
 
 ## Voice Commands
+
+### Email
+
+| Say | What happens |
+|---|---|
+| *"Find the last email from KMM school"* | Keyword search in Gmail; web-search fallback to resolve domain if needed |
+| *"Find the email called Penktadienio laiškas"* | Gmail search with Lithuanian subject; auto-detected and read in Lithuanian |
+| *"Summarize it in 5 sentences"* | Re-fetches the email found in the previous turn; no need to repeat yourself |
+| *"Record that as a task named Friday email, run every Friday at 9am"* | Saves the last action as a scheduled task |
 
 ### Memory
 
@@ -189,12 +255,12 @@ JarvisLT/
 │
 ├── jarvis/
 │   ├── core/
-│   │   └── assistant.py           Main async loop — wires all components
+│   │   └── assistant.py           Main async loop — wake word, conversation mode, wires all components
 │   │
 │   ├── audio/
 │   │   ├── wake_word.py           Wyoming wake word client
-│   │   ├── listener.py            Wyoming STT + silence-based VAD
-│   │   └── speaker.py             speaches TTS + sounddevice playback
+│   │   ├── listener.py            Wyoming STT + silence-based VAD + speech timeout
+│   │   └── speaker.py             speaches TTS + edge-tts multilingual + sounddevice playback
 │   │
 │   ├── llm/
 │   │   ├── claude_client.py       OpenAI client — tool-use loop, MCP, local tool registry
@@ -239,7 +305,7 @@ JarvisLT/
 | Service | Port | Purpose |
 |---|---|---|
 | speaches (Docker) | 8000 | TTS — OpenAI-compatible REST, Kokoro-82M voice |
-| wyoming-whisper (Docker) | 10300 | STT — Wyoming TCP protocol |
+| wyoming-whisper (Docker) | 10300 | STT — Wyoming TCP, multilingual auto-detect |
 | wyoming-openwakeword (Docker) | 10400 | Wake word — Wyoming TCP protocol |
 | Neo4j (Docker) | 7474, 7687 | Graph DB — long-term entity memory |
 | Neo4j browser | 7474 | Web UI to inspect graph data |

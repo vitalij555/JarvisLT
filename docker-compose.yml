@@ -26,7 +26,7 @@ services:
       - "10300:10300"
     volumes:
       - whisper_models:/data
-    command: --uri tcp://0.0.0.0:10300 --model tiny-int8 --language en
+    command: --uri tcp://0.0.0.0:10300 --model small-int8 --language auto
 
   openwakeword:
     image: rhasspy/wyoming-openwakeword

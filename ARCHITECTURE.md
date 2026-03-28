@@ -28,6 +28,7 @@ The entire system runs on a single `asyncio` event loop (`asyncio.run(assistant.
 - **Async handlers** (memory tools, task tools, web tools) are awaited directly — detected via `asyncio.iscoroutinefunction`.
 - **Background summarisation** runs as `asyncio.create_task(...)` after each assistant turn — never blocks the wake-word loop.
 - **APScheduler** uses `AsyncIOScheduler` — shares the event loop, no threads or subprocesses needed.
+- **TTS playback** (`sd.play` + `sd.wait`) is dispatched via `run_in_executor` so the event loop is not blocked during audio output.
 
 ---
 
@@ -40,17 +41,26 @@ asyncio.run(assistant.run())
   ├── await memory_manager.init()    # connect Neo4j, init ChromaDB
   ├── await task_runner.start()      # load + schedule all tasks
   │
-  └── loop forever:
-        await wake_detector.wait_for_wake_word()   # blocks on Wyoming TCP
+  └── outer loop (wake word):
+        await wake_detector.wait_for_wake_word()
         await speaker.speak("Yes?")
-        text = await listener.listen()             # VAD → STT via Wyoming TCP
-        memory.add_turn("user", text)
-        response = await llm.chat_async(text, memory)   # tool-use loop (see below)
-        memory.add_turn("assistant", response)
-        memory.save()
-        asyncio.create_task(memory_manager.summarize_and_store(...))   # background
-        await speaker.speak(response)
+
+        inner loop (conversation mode):
+          text = await listener.listen(timeout=current_timeout)
+          if no speech within timeout:
+            if in_conversation: await speaker.speak("Going to sleep...")
+            break  →  back to outer loop
+
+          memory.add_turn("user", text)
+          response = await llm.chat_async(text, memory)   # tool-use loop (see below)
+          memory.add_turn("assistant", response)
+          memory.save()
+          asyncio.create_task(memory_manager.summarize_and_store(...))   # background
+          await speaker.speak(response)
+          current_timeout = conversation_timeout  # 60s for follow-ups
 ```
+
+The first listen after "Yes?" uses `speech_timeout` (8s default). After each response, the listener waits up to `conversation_timeout` (60s) for a follow-up before announcing sleep and returning to wake-word detection.
 
 ---
 
@@ -83,6 +93,80 @@ llm.register_local_tools(WEB_TOOLS,    WebToolHandler())     # async handler
 
 Sync vs async is detected automatically via `asyncio.iscoroutinefunction`. Adding a new capability never touches the tool-use loop — only `assistant.__init__()` and the new package.
 
+**Important:** Tool call results (including fetched email content, IDs, etc.) exist only within the `messages` list of a single `chat_async` call. They are NOT persisted to `ConversationMemory`. Only the final text response is stored. On follow-up turns, the LLM must re-fetch items using identifiers (subject, sender, date) mentioned in the prior text response.
+
+---
+
+## Multilingual Architecture
+
+### Speech-to-Text
+
+wyoming-faster-whisper runs with `--model small-int8 --language auto`. Whisper detects the spoken language automatically — Lithuanian, Polish, Russian, and mixed-language input (e.g. English sentence with a Lithuanian proper noun) are all transcribed correctly.
+
+### Text-to-Speech
+
+`Speaker` routes each utterance through a two-stage decision:
+
+```
+speak(text)
+  → _detect_language(text)
+      ├── text < 60 chars or >30% ASCII words  →  "en"  (short/mixed content)
+      └── langdetect.detect(text)              →  ISO 639-1 code
+  → lang in multilingual_voices?
+      ├── yes  →  _speak_edge_tts(text, voice)  →  miniaudio decode  →  sd.play
+      └── no   →  _speak_speaches(text)         →  WAV response      →  sd.play
+```
+
+The 30%-ASCII-word heuristic prevents mixed responses like *"Found it! Subject: 'Penktadienio laiškas'"* from being classified as Lithuanian — the English framing words keep it above the threshold.
+
+**Voice mapping** (configurable in `config.yaml` under `speaches.multilingual_voices`):
+
+| Language | Engine | Default voice |
+|---|---|---|
+| English (and default) | speaches / Kokoro-82M | `af_heart` |
+| Lithuanian (`lt`) | edge-tts | `lt-LT-OnaNeural` |
+| Polish (`pl`) | edge-tts | `pl-PL-ZofiaNeural` |
+| Russian (`ru`) | edge-tts | `ru-RU-SvetlanaNeural` |
+
+Any language not in the mapping falls back to speaches/English. Additional languages are added by extending `multilingual_voices` — no code changes needed.
+
+---
+
+## Voice Activity Detection (VAD)
+
+`SpeechListener.listen()` implements a simple energy-based VAD:
+
+```
+Open mic stream
+deadline = now + speech_timeout   (8s default)
+
+loop:
+  chunk = mic_queue.get(timeout=0.2)
+  if Empty and not got_speech and now > deadline:
+    return ""    ← timeout, no speech detected
+
+  rms = sqrt(mean(chunk²))
+  send chunk to Wyoming STT
+
+  if rms > silence_threshold:
+    got_speech = True; reset silent_chunks
+  elif got_speech:
+    silent_chunks += 1
+    if silent_chunks >= silence_chunks:
+      break    ← speech ended (silence_duration of silence)
+
+Send AudioStop → read Transcript → return text
+```
+
+Key parameters (all tunable in `config.yaml`):
+
+| Parameter | Default | Effect |
+|---|---|---|
+| `silence_threshold` | 100 | RMS below this = silence. Lower = more sensitive to quiet voices. |
+| `silence_duration` | 1.5s | Trailing silence before cutting off recording |
+| `speech_timeout` | 8.0s | Max wait for first speech before giving up (prevents infinite hang) |
+| `conversation_timeout` | 60.0s | Max wait for follow-up; passed as `timeout` override to `listen()` |
+
 ---
 
 ## Memory Architecture
@@ -103,7 +187,7 @@ Entity types: `person`, `place`, `event`, `preference`, `task`, `other`
 
 **Access pattern:** exact lookup by name, type listing, relationship traversal. Answers "What do I know about Sofia?" with structured facts.
 
-**Why Neo4j over SQLite:** User explicitly chose it. For a personal assistant at this scale (hundreds to low thousands of nodes) either works, but Neo4j gives a real graph query language (Cypher) and a browser UI at `localhost:7474` for inspecting/editing memory. Migration path from SQLite to Neo4j would have been straightforward if the choice had gone the other way — the `EntityStore` class abstracts the backend.
+**Why Neo4j over SQLite:** User explicitly chose it. For a personal assistant at this scale (hundreds to low thousands of nodes) either works, but Neo4j gives a real graph query language (Cypher) and a browser UI at `localhost:7474` for inspecting/editing memory.
 
 ### ChromaDB — Semantic Vector Memory
 
@@ -126,15 +210,34 @@ Results are merged into a single formatted string returned to the LLM as the too
 
 ---
 
+## Email Search Strategy
+
+The system prompt instructs the LLM to follow a two-step strategy when searching for emails by organisation name:
+
+1. **Keyword search first** — query Gmail with the org name as plain text (e.g. `query="KMM school"`). This avoids guessing domains and works for any sender whose name or domain contains the keyword.
+2. **Web search fallback** — if keyword search fails, call `google_search` to find the org's official email domain, then re-query Gmail with `from:<domain>`.
+
+On multi-turn follow-ups (e.g. "summarize it"), the LLM re-queries Gmail by subject and sender from the prior turn's text response. **Email IDs are never reused across turns** — they exist only within a single `chat_async` call and are not persisted.
+
+---
+
 ## Scheduler Architecture
 
 ### Static tasks (config.yaml)
 
-Defined under `scheduled_tasks:` with a cron expression or `interval_minutes`. Loaded at startup. Restart required to change.
+Defined under `scheduled_tasks:` with a cron expression or `interval_minutes`. Loaded at startup. Restart required to change. An empty or commented-out `scheduled_tasks:` section (parsed as `None` by YAML) is handled gracefully.
 
 ### Dynamic tasks (voice-created)
 
 `task_create` LLM tool writes to `task_definitions` table in `jarvis_tasks.db` with `source="voice"`. `TaskRunner.start()` loads both config tasks and DB tasks, so voice-created tasks survive restarts.
+
+### Task recording from conversation
+
+The system prompt instructs the LLM to handle *"record this as a task"* / *"save last command as task named X"* meta-commands by:
+1. Looking at the most recent action in conversation history
+2. Reconstructing a fully self-contained prompt (no references to "what you just did")
+3. Asking for a schedule if not given
+4. Calling `task_create`
 
 ### HeadlessSession
 
@@ -147,7 +250,7 @@ class HeadlessSession:
         return await self._llm.chat_async(prompt, memory)
 ```
 
-It reuses the already-started `LLMClient` (MCP servers already running), uses a fresh empty memory per task (no bleed between tasks), and has access to all registered tools (memory, web_crawl, HA, MCP). A scheduled task can call `web_crawl`, then `memory_remember`, then check Gmail — all in one prompt, using the full tool stack.
+It reuses the already-started `LLMClient` (MCP servers already running), uses a fresh empty memory per task (no bleed between tasks), and has access to all registered tools (memory, web_crawl, HA, MCP).
 
 ### Task delivery
 
@@ -222,11 +325,6 @@ search_places(query, location, radius_meters, open_now, max_results)
   → formatted results (name, address, rating, price level, open status)
 ```
 
-Geocoding first gives precise radius control. Text Search fallback handles vague location strings ("Vilnius old town") that don't geocode cleanly.
-
-**Nearby queries** work best when the user's home address is stored in Neo4j memory:
-*"Find coffee shops near me"* → LLM calls `memory_recall("home address")` → passes result to `search_places(location=<address>)`.
-
 Requires `GOOGLE_PLACES_API_KEY` env var (simple API key, not OAuth). No key → returns install hint.
 
 ---
@@ -254,11 +352,15 @@ mcp_servers:
 
 No code changes. Tools discovered automatically via `session.list_tools()`.
 
-### Adding a scheduled task (via voice)
+### Adding a language
 
-*"Jarvis, create a task called weekly_mastercard that runs every Monday at 9am: use web_crawl on https://www.mastercard.com/us/en/news-and-trends/stories.html with max_depth=2 and summarise the news."*
+In `config.yaml` under `speaches.multilingual_voices`, add the ISO 639-1 code and an edge-tts voice name:
+```yaml
+multilingual_voices:
+  de: "de-DE-KatjaNeural"
+```
 
-The `task_create` tool writes to `jarvis_tasks.db` and schedules it live in APScheduler.
+No code changes. `langdetect` will classify the text; `Speaker` will route it.
 
 ---
 
@@ -275,16 +377,21 @@ The `task_create` tool writes to `jarvis_tasks.db` and schedules it live in APSc
 | Interactive browsing | @playwright/mcp | Puppeteer MCP | Official Microsoft release, ~26 tools, headless flag |
 | Web search | Serper.dev REST | Google CSE (killed whole-web in 2026), Brave (no free tier), DDG scraping | Real Google results, 2500 free/month, simple REST, no infra |
 | Places search | Google Places API | Foursquare, HERE | Real Google data, geocoding + nearby search, same API key model as other Google services |
-| STT | wyoming-faster-whisper | Whisper API, Vosk | Local, offline, Wyoming protocol shared with wake word |
-| TTS | speaches (Kokoro-82M) | Piper, Coqui | OpenAI-compatible REST, high quality voice, local |
-| Wake word | wyoming-openwakeword | Porcupine, Snowboy | Free, local, Wyoming protocol |
+| STT | wyoming-faster-whisper small-int8, auto language | Whisper API, Vosk | Local, offline, multilingual, Wyoming protocol shared with wake word |
+| TTS (English) | speaches / Kokoro-82M | Piper, Coqui | OpenAI-compatible REST, high quality voice, local |
+| TTS (other languages) | edge-tts | gTTS, Azure TTS | Free, neural quality, no API key, supports Lithuanian/Polish/Russian, no ffmpeg needed |
+| Language detection | langdetect | langid, fastText | Simple pip install, offline, deterministic with seed=0 |
+| MP3 decoding | miniaudio | pydub+ffmpeg, soundfile | No external binary dependencies, single pip install |
 
 ---
 
 ## Known Limitations
 
-- **Neo4j startup latency:** If Neo4j is slow to start, entity tools log a warning and return "unavailable" rather than crashing. Retry not implemented — restart assistant after Neo4j is ready.
+- **Neo4j startup latency:** If Neo4j is slow to start, entity tools log a warning and return "unavailable" rather than crashing. Restart assistant after Neo4j is ready.
+- **Tool results not persisted in ConversationMemory:** Email IDs, full content, and other tool outputs exist only within a single `chat_async` call. Follow-up turns re-fetch by subject/sender. A future improvement could optionally store compact tool summaries in memory.
 - **crawl4ai deep_crawling import:** `BFSDeepCrawlStrategy` is in `crawl4ai.deep_crawling` which may not exist in older versions. `WebCrawler` falls back to single-page fetch gracefully.
-- **Conversation summarisation frequency:** `summarize_and_store` runs after every single assistant turn, which makes an additional LLM API call per turn. For high-frequency use this could be throttled to run only every N turns or on a time-based schedule.
-- **No speaker interruption:** If a scheduled task completes while the assistant is speaking, the result is only stored — it will not interrupt or queue after the current speech.
-- **Context window for long crawls:** `_TOTAL_CHAR_LIMIT = 40_000` characters from web crawls are returned to the LLM as a tool result. Very long crawls are truncated. The LLM must summarise within its context window.
+- **Conversation summarisation frequency:** `summarize_and_store` runs after every single assistant turn, making one additional LLM API call per turn. Could be throttled to every N turns for high-frequency use.
+- **No speaker interruption:** If a scheduled task completes while the assistant is speaking, the result is only stored — it will not interrupt or queue after current speech.
+- **Context window for long crawls:** `_TOTAL_CHAR_LIMIT = 40_000` characters from web crawls. Very long crawls are truncated.
+- **Language detection on short/mixed text:** Responses shorter than 60 chars or with >30% ASCII words always use the English voice. Purely foreign-language responses of sufficient length are routed correctly.
+- **Whisper model size vs accuracy trade-off:** `small-int8` balances speed and multilingual accuracy. For better Lithuanian/Polish/Russian recognition, upgrade to `medium-int8` in `docker-compose.yml` at the cost of higher latency and ~1.5 GB model download.

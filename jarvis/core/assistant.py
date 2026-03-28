@@ -45,12 +45,15 @@ class Assistant:
             chunk_ms=audio_cfg["chunk_ms"],
             silence_threshold=audio_cfg["silence_threshold"],
             silence_duration=audio_cfg["silence_duration"],
+            speech_timeout=audio_cfg.get("speech_timeout", 8.0),
         )
+        self._conversation_timeout = audio_cfg.get("conversation_timeout", 60.0)
 
         self.speaker = Speaker(
             base_url=speaches_cfg["base_url"],
             model=speaches_cfg["tts_model"],
             voice=speaches_cfg["tts_voice"],
+            multilingual_voices=speaches_cfg.get("multilingual_voices", {}),
         )
 
         self.memory = ConversationMemory(
@@ -104,26 +107,42 @@ class Assistant:
                 await self.wake_detector.wait_for_wake_word()
                 await self.speaker.speak("Yes?")
 
-                text = await self.listener.listen()
-                if not text.strip():
-                    logger.info("No speech detected, going back to sleep.")
-                    continue
+                # Inner conversation loop — stays active until timeout or error.
+                # First listen uses the short speech_timeout (8s).
+                # After each response, follow-ups use conversation_timeout (60s).
+                current_timeout = None  # None = use listener's default speech_timeout
+                in_conversation = False
 
-                logger.info("User said: %r", text)
-                self.memory.add_turn("user", text)
+                while True:
+                    text = await self.listener.listen(timeout=current_timeout)
+                    if not text.strip():
+                        if in_conversation:
+                            logger.info("Conversation timed out, going back to sleep.")
+                            await self.speaker.speak(
+                                "Going to sleep. Say 'Hey Jarvis' to wake me up."
+                            )
+                        else:
+                            logger.info("No speech detected, going back to sleep.")
+                        break
 
-                response = await self.llm.chat_async(text, self.memory)
-                logger.info("Jarvis: %r", response)
+                    logger.info("User said: %r", text)
+                    self.memory.add_turn("user", text)
 
-                self.memory.add_turn("assistant", response)
-                self.memory.save()
+                    response = await self.llm.chat_async(text, self.memory)
+                    logger.info("Jarvis: %r", response)
 
-                # Async background summarisation — does not block the loop
-                asyncio.create_task(
-                    self.memory_manager.summarize_and_store(self.memory.get_context())
-                )
+                    self.memory.add_turn("assistant", response)
+                    self.memory.save()
 
-                await self.speaker.speak(response)
+                    asyncio.create_task(
+                        self.memory_manager.summarize_and_store(self.memory.get_context())
+                    )
+
+                    await self.speaker.speak(response)
+
+                    # Switch to long timeout for follow-ups
+                    current_timeout = self._conversation_timeout
+                    in_conversation = True
 
             except KeyboardInterrupt:
                 logger.info("Shutting down.")

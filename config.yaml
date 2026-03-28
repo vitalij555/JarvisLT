@@ -11,13 +11,21 @@ speaches:
   tts_voice: "af_heart" # Other options: af_sky, am_adam, bf_emma, bm_george, etc.
   # Used only if wyoming STT is unavailable (fallback path)
   stt_model: "Systran/faster-whisper-small"
+  # Languages not supported by Kokoro are routed to Microsoft edge-tts (free, neural quality).
+  # Run: python -m edge_tts --list-voices | grep -E "^lt|^pl|^ru" to see all options.
+  multilingual_voices:
+    lt: "lt-LT-OnaNeural"       # Lithuanian female
+    pl: "pl-PL-ZofiaNeural"     # Polish female
+    ru: "ru-RU-SvetlanaNeural"  # Russian female
 
 audio:
   sample_rate: 16000 # Hz — must match Wyoming server expectations
   channels: 1 # mono
   chunk_ms: 100 # milliseconds per audio chunk sent to Wyoming
-  silence_threshold: 200 # RMS below this = silence (tune for your microphone)
+  silence_threshold: 100 # RMS below this = silence (tune for your microphone; lower = more sensitive)
   silence_duration: 1.5 # seconds of silence before ending speech capture
+  speech_timeout: 8.0   # seconds to wait for first speech after "Yes?" before giving up
+  conversation_timeout: 60.0 # seconds to wait for a follow-up before going back to sleep
 
 llm:
   model: "gpt-4o"
@@ -27,6 +35,42 @@ llm:
     Keep responses concise — they will be spoken aloud.
     Use available tools when you need real-time information or to take actions.
     When using tools, don't narrate the tool call, just use it and report the result.
+
+    MULTI-TURN CONVERSATIONS:
+    - You have full conversation history. When the user refers to "it", "that email",
+      "the one you found", "same one", etc., look back in the conversation to identify
+      what they mean — do not ask them to repeat themselves.
+    - When you retrieve an item (email, calendar event, document), always include enough
+      identifying info in your spoken reply so you can re-find it on the next turn.
+      For emails: mention the subject, sender name, and date.
+      Example: "Found it — subject 'Parent meeting on Friday', from KMM school, March 25th."
+    - On follow-ups like "summarize it", "read it", "reply to it": use the subject/sender/date
+      from conversation history to re-fetch the exact item, then act on it.
+    - IMPORTANT: Never reuse email IDs from earlier in the conversation. Email IDs are only
+      valid within the same tool call. On follow-up turns, always re-query Gmail by subject
+      and sender to get a fresh ID before calling get_gmail_email.
+
+    EMAIL SEARCH RULES — follow these strictly:
+    1. When the user asks for emails from a person or organisation by name (e.g. "KMM school",
+       "dentist", "Amazon"), first search Gmail using the name as a plain keyword query
+       (e.g. query="KMM school") — do NOT guess or invent email domains.
+    2. If the keyword search returns no results or clearly wrong results, use google_search
+       to find the organisation's official email domain (e.g. search "KMM school official
+       website email contact Lithuania"). Extract the domain, then re-query Gmail with
+       from:<domain> (e.g. from:kmm.lt).
+    3. Only present emails that genuinely match the requested sender — if still uncertain,
+       say so and ask the user to clarify.
+
+    SAVING ACTIONS AS TASKS:
+    - When the user says "record this as a task", "save that as a task", "make a task called
+      X for what you just did", or "record last command as task named X":
+      1. Look at the most recent meaningful action in conversation history.
+      2. Reconstruct it as a fully self-contained task prompt — include all specifics
+         (sender name, subject keywords, what to summarize/do). No vague references like
+         "what you just did" — the task must work standalone without conversation context.
+      3. If the user did not specify a schedule, ask them: "When should this run?
+         For example, every Friday at 9am, or daily at 8am?"
+      4. Once you have a name and schedule, call task_create with the reconstructed prompt.
 
 memory:
   max_turns: 20 # max user+assistant turn pairs to keep in context

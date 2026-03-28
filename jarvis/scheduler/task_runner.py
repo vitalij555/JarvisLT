@@ -54,7 +54,7 @@ class TaskRunner:
         await self._store.init()
 
         # Load and schedule static tasks from config
-        for name, cfg in self._static_tasks.items():
+        for name, cfg in (self._static_tasks or {}).items():
             if not isinstance(cfg, dict):
                 continue
             task = TaskDefinition(

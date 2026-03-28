@@ -23,15 +23,21 @@ class SpeechListener:
         chunk_ms: int = 100,
         silence_threshold: int = 200,
         silence_duration: float = 1.5,
+        speech_timeout: float = 8.0,
     ) -> None:
         self.uri = uri
         self.sample_rate = sample_rate
         self.chunk_size = int(sample_rate * chunk_ms / 1000)
         self.silence_threshold = silence_threshold
         self.silence_chunks = int(silence_duration * 1000 / chunk_ms)
+        self.speech_timeout = speech_timeout
 
-    async def listen(self) -> str:
-        """Capture speech from microphone until silence, return transcript."""
+    async def listen(self, timeout: float | None = None) -> str:
+        """Capture speech from microphone until silence, return transcript.
+
+        Args:
+            timeout: Override the default speech_timeout for this call only.
+        """
         logger.info("Listening for speech...")
         audio_queue: queue.Queue[bytes] = queue.Queue()
 
@@ -48,6 +54,8 @@ class SpeechListener:
 
             silent_chunks = 0
             got_speech = False
+            effective_timeout = timeout if timeout is not None else self.speech_timeout
+            deadline = asyncio.get_event_loop().time() + effective_timeout
 
             with sd.InputStream(
                 samplerate=self.sample_rate,
@@ -60,6 +68,9 @@ class SpeechListener:
                     try:
                         chunk_bytes = audio_queue.get(timeout=0.2)
                     except queue.Empty:
+                        if not got_speech and asyncio.get_event_loop().time() > deadline:
+                            logger.info("No speech detected within timeout, giving up.")
+                            return ""
                         continue
 
                     audio_array = np.frombuffer(chunk_bytes, dtype=np.int16)
