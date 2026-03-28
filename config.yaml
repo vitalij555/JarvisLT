@@ -60,6 +60,12 @@ mcp_servers:
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
 
+  # Playwright browser — interactive JS-aware web browsing (navigate, snapshot, click, fill forms)
+  # One-time setup: npx playwright install chromium
+  playwright:
+    command: "npx"
+    args: ["@playwright/mcp@latest", "--headless"]
+
 # Neo4j graph memory (run: docker compose up -d neo4j)
 neo4j:
   uri: "bolt://localhost:7687"
@@ -98,3 +104,13 @@ scheduled_tasks:
   #     Check if my home server at 192.168.1.10 is reachable.
   #     Note the time if it is unreachable.
   #   enabled: true
+  #
+  # Example: weekly news scrape with web_crawl tool (depth=2 fetches listing + each article)
+  # mastercard_news:
+  #   cron: "0 9 * * 1"     # every Monday at 9am
+  #   prompt: |
+  #     Use the web_crawl tool to fetch https://www.mastercard.com/us/en/news-and-trends/stories.html
+  #     with max_depth=2 and max_pages=15.
+  #     Summarise the most important news stories from {date}.
+  #     For each story include: title, 2-3 sentence summary, and the article URL.
+  #   enabled: false
