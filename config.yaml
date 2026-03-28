@@ -60,6 +60,14 @@ mcp_servers:
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
 
+  # Brave Search — web search with clean structured results (free tier: 2000 searches/month)
+  # Get API key: https://brave.com/search/api/ → Free plan → copy key to .env as BRAVE_API_KEY
+  brave_search:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-brave-search"]
+    env:
+      BRAVE_API_KEY: ""   # overridden by BRAVE_API_KEY in .env
+
   # Playwright browser — interactive JS-aware web browsing (navigate, snapshot, click, fill forms)
   # One-time setup: npx playwright install chromium
   playwright:
