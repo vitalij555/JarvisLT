@@ -59,3 +59,42 @@ mcp_servers:
   # filesystem:
   #   command: "npx"
   #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+
+# Neo4j graph memory (run: docker compose up -d neo4j)
+neo4j:
+  uri: "bolt://localhost:7687"
+  user: "neo4j"
+  password: ""  # set NEO4J_PASSWORD in .env (overrides this)
+
+# ChromaDB vector memory
+memory_db:
+  chroma_path: ".chroma"
+
+# SQLite task database
+task_db:
+  path: "jarvis_tasks.db"
+
+# Scheduled tasks — static definitions (restart required to add/change)
+# Voice-created tasks are stored in jarvis_tasks.db automatically.
+scheduled_tasks:
+  # morning_news:
+  #   cron: "0 7 * * *"     # standard cron expression (minute hour day month weekday)
+  #   prompt: |
+  #     Fetch the latest headlines from bbc.com/news.
+  #     Summarize the top 5 stories in 2-3 sentences each.
+  #     Today is {date}.
+  #   enabled: true
+  #
+  # school_emails:
+  #   cron: "0 9 * * 5"     # every Friday at 9am
+  #   prompt: |
+  #     Check Gmail for emails from school-related senders received this week.
+  #     Summarize any important messages or announcements.
+  #   enabled: true
+  #
+  # server_check:
+  #   interval_minutes: 60
+  #   prompt: |
+  #     Check if my home server at 192.168.1.10 is reachable.
+  #     Note the time if it is unreachable.
+  #   enabled: true

@@ -31,7 +31,6 @@ class LLMClient:
         self.model = model
         self.system_prompt = system_prompt
         self.max_tokens = max_tokens
-        self.ha_connector = ha_connector
         self._mcp_configs = mcp_servers or {}
         self._client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
@@ -39,6 +38,27 @@ class LLMClient:
         self._mcp_tool_map: dict[str, ClientSession] = {}  # tool_name -> session
         self._mcp_tools: list[dict[str, Any]] = []  # OpenAI-format tool schemas
         self._exit_stack = AsyncExitStack()
+
+        # Extensible local tool registry: tool_name -> handler object
+        self._local_tool_map: dict[str, Any] = {}
+        self._local_tools: list[dict[str, Any]] = []
+
+        # Register HA connector via the standard pattern if provided
+        if ha_connector:
+            self.register_local_tools(HA_TOOLS, ha_connector)
+
+    def register_local_tools(self, schemas: list[dict[str, Any]], handler: Any) -> None:
+        """Register a set of tool schemas and their handler for use in the LLM tool loop."""
+        for tool in schemas:
+            self._local_tool_map[tool["name"]] = handler
+            self._local_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": tool["input_schema"],
+                },
+            })
 
     @staticmethod
     def _sanitize_schema(schema: Any) -> dict[str, Any]:
@@ -106,24 +126,18 @@ class LLMClient:
         await self._exit_stack.aclose()
 
     def _build_tools(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = []
-        if self.ha_connector:
-            for tool in HA_TOOLS:
-                tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool["name"],
-                        "description": tool["description"],
-                        "parameters": tool["input_schema"],
-                    },
-                })
+        tools = list(self._local_tools)
         tools.extend(self._mcp_tools)
         return tools
 
-    def _handle_local_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
-        if self.ha_connector and tool_name.startswith("ha_"):
-            return self.ha_connector.handle_tool_call(tool_name, tool_input)
-        raise ValueError(f"No handler for tool: {tool_name}")
+    async def _handle_local_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
+        handler = self._local_tool_map.get(tool_name)
+        if handler is None:
+            raise ValueError(f"No handler for tool: {tool_name}")
+        if asyncio.iscoroutinefunction(handler.handle_tool_call):
+            return await handler.handle_tool_call(tool_name, tool_input)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, handler.handle_tool_call, tool_name, tool_input)
 
     async def _call_mcp_tool(self, tool_name: str, tool_input: dict[str, Any]) -> Any:
         session = self._mcp_tool_map[tool_name]
@@ -174,7 +188,7 @@ class LLMClient:
                         if tool_name in self._mcp_tool_map:
                             result = await self._call_mcp_tool(tool_name, tool_input)
                         else:
-                            result = self._handle_local_tool(tool_name, tool_input)
+                            result = await self._handle_local_tool(tool_name, tool_input)
                     except Exception as exc:
                         result = {"error": str(exc)}
                     logger.info("Tool result: %s", str(result)[:200])

@@ -7,6 +7,8 @@ conversation_history.json
 .accounts.json
 .DS_Store
 Pipfile.lock
+.chroma/
+jarvis_tasks.db
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

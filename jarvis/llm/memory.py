@@ -16,9 +16,9 @@ class Turn(TypedDict):
 
 
 class ConversationMemory:
-    def __init__(self, max_turns: int = 20, persist_path: str = "conversation_history.json") -> None:
+    def __init__(self, max_turns: int = 20, persist_path: str | None = "conversation_history.json") -> None:
         self.max_turns = max_turns
-        self.persist_path = Path(persist_path)
+        self.persist_path = Path(persist_path) if persist_path else None
         self._turns: list[Turn] = []
         self._load()
 
@@ -37,13 +37,15 @@ class ConversationMemory:
         self.save()
 
     def save(self) -> None:
+        if not self.persist_path:
+            return
         try:
             self.persist_path.write_text(json.dumps(self._turns, indent=2))
         except OSError as exc:
             logger.warning("Could not save conversation history: %s", exc)
 
     def _load(self) -> None:
-        if not self.persist_path.exists():
+        if not self.persist_path or not self.persist_path.exists():
             return
         try:
             data = json.loads(self.persist_path.read_text())

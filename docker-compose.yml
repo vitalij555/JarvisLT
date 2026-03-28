@@ -38,10 +38,24 @@ services:
       - openwakeword_models:/data
     command: --uri tcp://0.0.0.0:10400 --preload-model hey_jarvis
 
+  neo4j:
+    image: neo4j:5-community
+    container_name: jarvis-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # browser UI
+      - "7687:7687"   # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-jarvispass}"
+
 volumes:
   speaches_models:
     driver: local
   whisper_models:
     driver: local
   openwakeword_models:
+    driver: local
+  neo4j_data:
     driver: local

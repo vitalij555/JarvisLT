@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -11,6 +12,10 @@ from jarvis.audio.wake_word import WakeWordDetector
 from jarvis.connectors.home_assistant import HomeAssistantConnector
 from jarvis.llm.claude_client import LLMClient
 from jarvis.llm.memory import ConversationMemory
+from jarvis.memory.memory_manager import MemoryManager
+from jarvis.memory.memory_tools import MEMORY_TOOLS, MemoryToolHandler
+from jarvis.scheduler.task_runner import TaskRunner
+from jarvis.scheduler.task_tools import TASK_TOOLS, TaskToolHandler
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +73,23 @@ class Assistant:
             ha_connector=ha_connector,
         )
 
+        self.memory_manager = MemoryManager(config)
+        self.memory_manager.set_llm(self.llm)
+        self.llm.register_local_tools(MEMORY_TOOLS, MemoryToolHandler(self.memory_manager))
+
+        self.task_runner = TaskRunner(
+            static_tasks=config.get("scheduled_tasks", {}),
+            llm=self.llm,
+            db_path=config.get("task_db", {}).get("path", "jarvis_tasks.db"),
+            memory_manager=self.memory_manager,
+        )
+        self.llm.register_local_tools(TASK_TOOLS, TaskToolHandler(self.task_runner))
+
     async def run(self) -> None:
         """Main loop: wake word → listen → think → speak → repeat."""
         await self.llm.start()
+        await self.memory_manager.init()
+        await self.task_runner.start()
         logger.info("Jarvis is ready. Waiting for wake word...")
         await self.speaker.speak("Jarvis online. Say 'Hey Jarvis' to activate.")
 
@@ -93,11 +112,18 @@ class Assistant:
                 self.memory.add_turn("assistant", response)
                 self.memory.save()
 
+                # Async background summarisation — does not block the loop
+                asyncio.create_task(
+                    self.memory_manager.summarize_and_store(self.memory.get_context())
+                )
+
                 await self.speaker.speak(response)
 
             except KeyboardInterrupt:
                 logger.info("Shutting down.")
+                await self.task_runner.stop()
                 await self.llm.stop()
+                await self.memory_manager.close()
                 break
             except Exception as exc:
                 logger.exception("Unexpected error in main loop: %s", exc)
