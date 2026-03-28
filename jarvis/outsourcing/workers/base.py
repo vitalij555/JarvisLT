@@ -35,13 +35,16 @@ class BaseWorker(ABC):
     @abstractmethod
     async def run(self, prompt: str) -> WorkerResult: ...
 
-    async def _run_subprocess(self, args: list[str], prompt: str) -> WorkerResult:
+    async def _run_subprocess(
+        self, args: list[str], prompt: str, cwd: str | None = None
+    ) -> WorkerResult:
         """Common subprocess runner with timeout handling."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
             )
             try:
                 stdout, stderr = await asyncio.wait_for(

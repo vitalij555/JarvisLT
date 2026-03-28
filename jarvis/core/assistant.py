@@ -17,6 +17,7 @@ from jarvis.llm.claude_client import LLMClient
 from jarvis.llm.memory import ConversationMemory
 from jarvis.memory.memory_manager import MemoryManager
 from jarvis.memory.memory_tools import MEMORY_TOOLS, MemoryToolHandler
+from jarvis.dev_team.dev_team_tools import DEV_TEAM_TOOLS, DevTeamToolHandler
 from jarvis.outsourcing.outsourcing_tools import OUTSOURCING_TOOLS, OutsourcingToolHandler
 from jarvis.scheduler.task_runner import TaskRunner
 from jarvis.scheduler.task_tools import TASK_TOOLS, TaskToolHandler
@@ -96,6 +97,7 @@ class Assistant:
         self.llm.register_local_tools(PLACES_TOOLS, PlacesToolHandler())
 
         self.pending_notifications: asyncio.Queue = asyncio.Queue()
+
         outsourcing_cfg = config.get("outsourcing", {})
         if outsourcing_cfg.get("enabled", False):
             outsourcing_handler = OutsourcingToolHandler(
@@ -103,6 +105,12 @@ class Assistant:
             )
             self.llm.register_local_tools(OUTSOURCING_TOOLS, outsourcing_handler)
             logger.info("Outsourcing department enabled")
+
+        dev_team_cfg = config.get("dev_team", {})
+        if dev_team_cfg.get("enabled", False):
+            dev_team_handler = DevTeamToolHandler(dev_team_cfg, self.pending_notifications)
+            self.llm.register_local_tools(DEV_TEAM_TOOLS, dev_team_handler)
+            logger.info("Dev team enabled")
 
     async def run(self) -> None:
         """Main loop: wake word → listen → think → speak → repeat."""
@@ -162,6 +170,21 @@ class Assistant:
                             await self.speaker.speak(
                                 f"{note['portal'].capitalize()} requires login for job scanning."
                             )
+                        elif note["type"] == "dev_team_done":
+                            if note.get("success"):
+                                summary = note.get("summary", "Project complete.")
+                                await self.speaker.speak(
+                                    f"Your dev team has finished. {summary}"
+                                )
+                            else:
+                                name = note.get("project_name", "the project")
+                                retries = note.get("retries", 0)
+                                error = note.get("error", "unknown error")
+                                await self.speaker.speak(
+                                    f"Your dev team ran into trouble with {name}. "
+                                    f"They tried {retries} times but couldn't complete it. "
+                                    f"{error}"
+                                )
 
                     # Switch to long timeout for follow-ups
                     current_timeout = self._conversation_timeout

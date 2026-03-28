@@ -19,10 +19,11 @@ class CodexWorker(BaseWorker):
     async def is_available(self) -> bool:
         return await self._check_command_exists("codex")
 
-    async def run(self, prompt: str) -> WorkerResult:
+    async def run(self, prompt: str, cwd: str | None = None) -> WorkerResult:
         logger.info("CodexWorker: running prompt (%d chars)", len(prompt))
         # --full-auto: non-interactive, no approval prompts
         return await self._run_subprocess(
             ["codex", "--full-auto", prompt],
             prompt,
+            cwd=cwd,
         )

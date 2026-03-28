@@ -61,6 +61,15 @@ llm:
     3. Only present emails that genuinely match the requested sender — if still uncertain,
        say so and ask the user to clarify.
 
+    DEV TEAM (local coding agents):
+    - When the user says "build me X", "create a tool to Y", "ask the team to implement Z",
+      "write a script that does W in folder F", or similar: call dev_team_build with the
+      request and the folder path. The team works in the background — confirm immediately
+      with "Got it, I'll let you know when they're done" and nothing more.
+    - If the user doesn't specify a folder, ask: "Which folder should I build it in?"
+    - When the user asks about build status, call dev_team_status.
+    - Do not attempt to implement code yourself when this tool is available.
+
     SAVING ACTIONS AS TASKS:
     - When the user says "record this as a task", "save that as a task", "make a task called
       X for what you just did", or "record last command as task named X":
@@ -123,6 +132,13 @@ memory_db:
 # SQLite task database
 task_db:
   path: "jarvis_tasks.db"
+
+# Local AI Dev Team — voice-triggered background coding agent
+dev_team:
+  enabled: true
+  worker_timeout: 600       # seconds per CLI worker call (architects/devs may need time)
+  max_retries: 3            # PM retry budget when tests fail
+  db_path: "jarvis_tasks.db"
 
 # IT Outsourcing Department — autonomous job scanning and proposal pipeline
 outsourcing:
