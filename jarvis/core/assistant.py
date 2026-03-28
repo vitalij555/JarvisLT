@@ -10,6 +10,7 @@ from jarvis.audio.listener import SpeechListener
 from jarvis.audio.speaker import Speaker
 from jarvis.audio.wake_word import WakeWordDetector
 from jarvis.connectors.home_assistant import HomeAssistantConnector
+from jarvis.connectors.places_tools import PLACES_TOOLS, PlacesToolHandler
 from jarvis.connectors.search_tools import SEARCH_TOOLS, SearchToolHandler
 from jarvis.connectors.web_tools import WEB_TOOLS, WebToolHandler
 from jarvis.llm.claude_client import LLMClient
@@ -88,6 +89,7 @@ class Assistant:
         self.llm.register_local_tools(TASK_TOOLS, TaskToolHandler(self.task_runner))
         self.llm.register_local_tools(WEB_TOOLS, WebToolHandler())
         self.llm.register_local_tools(SEARCH_TOOLS, SearchToolHandler())
+        self.llm.register_local_tools(PLACES_TOOLS, PlacesToolHandler())
 
     async def run(self) -> None:
         """Main loop: wake word → listen → think → speak → repeat."""
