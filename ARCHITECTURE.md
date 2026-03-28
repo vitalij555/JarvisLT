@@ -192,6 +192,45 @@ Best for interactive tasks requiring navigation:
 
 ---
 
+## Search & Places Architecture
+
+### `google_search` (local tool — Serper.dev)
+
+Single async `httpx` POST to `https://google.serper.dev/search`. Returns:
+- Answer box / featured snippet (direct answers for factual queries)
+- Knowledge graph card (for people, places, organisations)
+- Organic results: title, URL, snippet
+
+Requires `SERPER_API_KEY` env var. 2500 free searches/month. No API key → returns install hint, does not crash.
+
+**Why Serper over alternatives:**
+- Google Custom Search API: killed "Search the entire web" for new engines as of Jan 2026
+- Brave Search API: no free tier
+- DuckDuckGo scraping: unofficial, fragile
+- Serper: real Google results, generous free tier, simple REST
+
+### `search_places` (local tool — Google Places API)
+
+Two-phase async call using `httpx`:
+
+```
+search_places(query, location, radius_meters, open_now, max_results)
+  → geocode(location)        # GET /maps/api/geocode/json → lat,lng
+  → nearby_search(coords)    # GET /maps/api/place/nearbysearch/json
+  OR (if geocode fails)
+  → text_search(query+loc)   # GET /maps/api/place/textsearch/json
+  → formatted results (name, address, rating, price level, open status)
+```
+
+Geocoding first gives precise radius control. Text Search fallback handles vague location strings ("Vilnius old town") that don't geocode cleanly.
+
+**Nearby queries** work best when the user's home address is stored in Neo4j memory:
+*"Find coffee shops near me"* → LLM calls `memory_recall("home address")` → passes result to `search_places(location=<address>)`.
+
+Requires `GOOGLE_PLACES_API_KEY` env var (simple API key, not OAuth). No key → returns install hint.
+
+---
+
 ## Extension Points
 
 ### Adding a new capability
@@ -234,6 +273,8 @@ The `task_create` tool writes to `jarvis_tasks.db` and schedules it live in APSc
 | Task persistence | aiosqlite | — | Lightweight, async, shares existing Python runtime |
 | Web scraping | crawl4ai + Playwright | BeautifulSoup, Scrapy, Selenium | LLM-friendly markdown output, JS rendering, depth crawling, no DOM code |
 | Interactive browsing | @playwright/mcp | Puppeteer MCP | Official Microsoft release, ~26 tools, headless flag |
+| Web search | Serper.dev REST | Google CSE (killed whole-web in 2026), Brave (no free tier), DDG scraping | Real Google results, 2500 free/month, simple REST, no infra |
+| Places search | Google Places API | Foursquare, HERE | Real Google data, geocoding + nearby search, same API key model as other Google services |
 | STT | wyoming-faster-whisper | Whisper API, Vosk | Local, offline, Wyoming protocol shared with wake word |
 | TTS | speaches (Kokoro-82M) | Piper, Coqui | OpenAI-compatible REST, high quality voice, local |
 | Wake word | wyoming-openwakeword | Porcupine, Snowboy | Free, local, Wyoming protocol |

@@ -18,6 +18,8 @@ A local-first, voice-activated personal assistant with long-term memory, schedul
 | Scheduled tasks | APScheduler — cron or interval, defined in config or by voice |
 | Web crawling | crawl4ai + Playwright — JS-heavy pages, configurable depth |
 | Interactive browsing | @playwright/mcp — LLM-driven navigation, clicking, form filling |
+| Web search | Serper.dev — real Google search results, 2500 free/month |
+| Places search | Google Places API — restaurants, shops, POIs with ratings and hours |
 | Home automation | Home Assistant REST API |
 | Extensible tools | Any MCP server added to config.yaml is auto-discovered |
 
@@ -47,9 +49,11 @@ pipenv install
 ```bash
 cp .env.example .env
 # Edit .env and fill in:
-#   OPENAI_API_KEY=sk-...
-#   HA_TOKEN=...              (optional, for Home Assistant)
-#   NEO4J_PASSWORD=jarvispass (or your chosen password)
+#   OPENAI_API_KEY=sk-...          (required)
+#   NEO4J_PASSWORD=jarvispass      (or your chosen password)
+#   HA_TOKEN=...                   (optional, for Home Assistant)
+#   SERPER_API_KEY=...             (optional, for Google search — serper.dev)
+#   GOOGLE_PLACES_API_KEY=...      (optional, for restaurant/POI search)
 ```
 
 ### 3. Start Docker services
@@ -151,13 +155,26 @@ Jarvis discovers all tools from the server automatically on startup.
 | *"What happened while I slept?"* | Returns task results from last 8 hours |
 | *"Delete the server check task"* | Removed from DB and scheduler |
 
-### Web
+### Web & Search
 
 | Say | What happens |
 |---|---|
+| *"Search for the latest news about quantum computing"* | Google search via Serper |
+| *"What is the current population of Lithuania?"* | Google search — returns answer box directly |
 | *"Fetch the BBC news homepage and summarise it"* | Single-page crawl via crawl4ai |
 | *"Check the Mastercard news page and list all articles"* | depth=2 crawl (listing + each article) |
 | *"Go to bbc.com and click on the Technology section"* | Interactive via @playwright/mcp |
+
+### Places
+
+| Say | What happens |
+|---|---|
+| *"Find Italian restaurants near Gedimino 1, Vilnius"* | Google Places search with radius |
+| *"Find coffee shops near me open now"* | Uses stored home address from memory |
+| *"Find a pharmacy nearby"* | Places search with open/closed status |
+
+> **Tip:** Store your home address once so "nearby" always works:
+> *"Hey Jarvis, remember that my home address is Gedimino pr. 1, Vilnius"*
 
 ---
 
@@ -197,7 +214,9 @@ JarvisLT/
 │   └── connectors/
 │       ├── home_assistant.py      HA REST — get_state, call_service, list_entities
 │       ├── web_crawler.py         crawl4ai depth crawler (Playwright backend)
-│       └── web_tools.py           LLM tool schema: web_crawl
+│       ├── web_tools.py           LLM tool schema: web_crawl
+│       ├── search_tools.py        LLM tool schema: google_search (Serper.dev)
+│       └── places_tools.py        LLM tool schema: search_places (Google Places API)
 │
 └── jarvis_tasks.db                SQLite — task definitions + run history (gitignored)
 ```
