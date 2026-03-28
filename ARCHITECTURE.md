@@ -385,6 +385,89 @@ No code changes. `langdetect` will classify the text; `Speaker` will route it.
 
 ---
 
+## IT Outsourcing Department
+
+An autonomous background system that monitors job portals, scores listings, generates proposals via a multi-agent pipeline, and asks the user for voice approval before submitting.
+
+### Flow
+
+```
+APScheduler (hourly, when toptal_scan/upwork_scan enabled)
+  → HeadlessSession.run("Use outsourcing_scan_jobs …")
+    → OutsourcingToolHandler._scan()
+      → JobScraper.fetch_new(portal)        # crawl4ai / RSS
+        → dedup by SHA256(url) against outsourcing.db
+      → DirectorAgent.evaluate(listing)     # gpt-4o-mini, cheap
+        if score >= min_score:
+          → DirectorAgent.run_proposal_chain(listing)
+              → PMAgent.assess()            # gpt-4o-mini, JSON output
+              → CRMAgent.draft_outreach()   # gpt-4o-mini, JSON output
+              → SalesAgent.build_proposal() # gpt-4o-mini, JSON output
+              → WorkerPool.run(prompt)      # claude CLI or codex CLI (optional, code samples)
+          → store ProposalBrief in outsourcing.db, status=awaiting_approval
+          → pending_queue.put({"type": "opportunity", …})
+
+Main voice loop — after each speaker.speak(response):
+  while not pending_notifications.empty():
+    → speaker.speak("By the way, I found a promising job. <preview>.")
+
+User says "approve job abc12345":
+  → outsourcing_approve tool → DirectorAgent.execute(job_id)
+      → LLMClient.chat_async("Create Gmail draft …", fresh_memory)   # Gmail MCP
+      → LLMClient.chat_async("Navigate and submit …", fresh_memory)  # Playwright MCP
+      → update status=submitted in outsourcing.db
+```
+
+### Agent Roles
+
+| Agent | Model | Purpose |
+|---|---|---|
+| Director (eval) | gpt-4o-mini | Score 0-10 + pursue decision per listing |
+| PMAgent | gpt-4o-mini | Scope, tech stack, hours estimate, red flags |
+| CRMAgent | gpt-4o-mini | Personalised outreach email (subject + body) |
+| SalesAgent | gpt-4o-mini | Proposal pitch, rate justification, CTA |
+| WorkerPool | claude CLI / codex CLI | Code sample generation (subprocess, optional) |
+| Director (execute) | gpt-4o (via LLMClient) | Gmail draft + Playwright portal submission |
+
+### Cost Controls
+
+- `max_evaluations_per_day` — hard daily cap on gpt-4o-mini eval calls
+- `min_score` — only listings above this threshold enter the proposal chain
+- Workers only invoked when `needs_code_sample=true` from eval result
+- All subordinate agents use gpt-4o-mini; gpt-4o only used in `execute()` (after user approval)
+
+### Database Schema (`outsourcing.db`)
+
+```sql
+CREATE TABLE job_listings (
+    id TEXT PRIMARY KEY,           -- SHA256(url)[:32]
+    portal TEXT NOT NULL,
+    title TEXT, url TEXT, raw_text TEXT,
+    fetched_at TEXT, score INTEGER,
+    status TEXT DEFAULT 'pending', -- pending | awaiting_approval | approved | rejected | submitted | auth_required
+    rationale TEXT
+);
+
+CREATE TABLE proposal_briefs (
+    job_id TEXT PRIMARY KEY REFERENCES job_listings(id),
+    pm_assessment TEXT, crm_draft TEXT,
+    sales_pitch TEXT, worker_output TEXT,
+    full_brief TEXT, created_at TEXT
+);
+```
+
+### Notification Mechanism
+
+`OutsourcingToolHandler` and `DirectorAgent.run_proposal_chain()` push events to `assistant.pending_notifications` (an `asyncio.Queue`). The main voice loop drains this queue non-blocking after every TTS output. The user hears the alert at the tail of the next interaction — no blocked loop, no missed events.
+
+### Enabling Hourly Scans
+
+In `config.yaml`, uncomment and enable the `toptal_scan` and/or `upwork_scan` entries under `scheduled_tasks`. Restart required. Configure your profile via:
+- Voice: *"Add Go to my outsourcing skills"* / *"Set minimum rate to 100 dollars"*
+- Or edit `outsourcing_profile.json` directly
+
+---
+
 ## Known Limitations
 
 - **Neo4j startup latency:** If Neo4j is slow to start, entity tools log a warning and return "unavailable" rather than crashing. Restart assistant after Neo4j is ready.

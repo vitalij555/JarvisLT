@@ -124,6 +124,22 @@ memory_db:
 task_db:
   path: "jarvis_tasks.db"
 
+# IT Outsourcing Department — autonomous job scanning and proposal pipeline
+outsourcing:
+  enabled: true
+  profile_path: "outsourcing_profile.json"
+  db_path: "outsourcing.db"
+  min_score: 7                  # 0-10 — listings below this are skipped
+  max_evaluations_per_day: 20   # cost guard (gpt-4o-mini calls)
+  worker_timeout: 300           # seconds for claude/codex CLI subprocess calls
+  portals:
+    toptal:
+      enabled: true
+      session_state: "toptal_session.json"
+    upwork:
+      enabled: true
+      session_state: "upwork_session.json"
+
 # Scheduled tasks — static definitions (restart required to add/change)
 # Voice-created tasks are stored in jarvis_tasks.db automatically.
 scheduled_tasks:
@@ -157,4 +173,15 @@ scheduled_tasks:
   #     with max_depth=2 and max_pages=15.
   #     Summarise the most important news stories from {date}.
   #     For each story include: title, 2-3 sentence summary, and the article URL.
+  #   enabled: false
+  #
+  # Outsourcing department — enable once your outsourcing_profile.json is configured.
+  # toptal_scan:
+  #   interval_minutes: 60
+  #   prompt: "Use outsourcing_scan_jobs with portal='toptal' to fetch and evaluate new listings."
+  #   enabled: false
+  #
+  # upwork_scan:
+  #   interval_minutes: 60
+  #   prompt: "Use outsourcing_scan_jobs with portal='upwork' to fetch and evaluate new listings."
   #   enabled: false

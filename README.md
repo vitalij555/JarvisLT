@@ -23,6 +23,7 @@ A local-first, voice-activated personal assistant with long-term memory, schedul
 | Web search | Serper.dev — real Google search results, 2500 free/month |
 | Places search | Google Places API — restaurants, shops, POIs with ratings and hours |
 | Home automation | Home Assistant REST API |
+| IT outsourcing department | Hourly Toptal/Upwork scan → multi-agent proposal pipeline → voice approval → auto-submit |
 | Extensible tools | Any MCP server added to config.yaml is auto-discovered |
 
 ---
@@ -286,6 +287,49 @@ Jarvis discovers all tools from the server automatically on startup.
 
 ---
 
+## IT Outsourcing Department
+
+Jarvis can autonomously monitor job portals, score listings against your profile, and run a full proposal pipeline — then ask you for voice approval before submitting anything.
+
+### How it works
+
+1. **Hourly scan** (when enabled) — fetches new listings from Toptal and Upwork
+2. **Director evaluates** each listing (gpt-4o-mini) — scores 0-10, skips poor matches
+3. **Proposal pipeline** — PM → CRM → Sales agents each produce structured JSON (scope, outreach email, sales pitch)
+4. **Voice alert** — after your next interaction: *"By the way, I found a promising job. Senior Python API role on Toptal, score 9/10. Say 'show opportunities' to review."*
+5. **You approve** — *"Show opportunities"* / *"Approve job abc12345"*
+6. **Director executes** — creates Gmail draft + submits via Playwright (stops if login required)
+
+### Setup
+
+Configure your profile (skills, rate, red flags) before enabling scans:
+
+```bash
+# Edit directly:
+nano outsourcing_profile.json
+
+# Or via voice:
+# "Add FastAPI to my outsourcing skills"
+# "Set minimum rate to 80 dollars per hour"
+# "Add PHP to my red flags"
+```
+
+Enable hourly scanning in `config.yaml` — uncomment `toptal_scan` and/or `upwork_scan` under `scheduled_tasks`.
+
+### Outsourcing voice commands
+
+| Say | What happens |
+|---|---|
+| *"Scan for new jobs on Toptal"* | Manual scan, evaluates all new listings |
+| *"Show opportunities"* | Lists pending approvals with scores |
+| *"Get the brief for job abc12345"* | Full PM + outreach + proposal text |
+| *"Approve job abc12345"* | Director submits application + creates Gmail draft |
+| *"Reject job abc12345"* | Marks dismissed |
+| *"Add Go to my outsourcing skills"* | Updates profile |
+| *"Set minimum rate to 100 dollars"* | Updates profile |
+
+---
+
 ## Project Structure
 
 ```
@@ -319,14 +363,31 @@ JarvisLT/
 │   │   ├── task_runner.py         APScheduler + HeadlessSession (LLM without audio)
 │   │   └── task_tools.py          LLM tool schemas: create/list/delete/results
 │   │
-│   └── connectors/
-│       ├── home_assistant.py      HA REST — get_state, call_service, list_entities
-│       ├── web_crawler.py         crawl4ai depth crawler (Playwright backend)
-│       ├── web_tools.py           LLM tool schema: web_crawl
-│       ├── search_tools.py        LLM tool schema: google_search (Serper.dev)
-│       └── places_tools.py        LLM tool schema: search_places (Google Places API)
+│   ├── connectors/
+│   │   ├── home_assistant.py      HA REST — get_state, call_service, list_entities
+│   │   ├── web_crawler.py         crawl4ai depth crawler (Playwright backend)
+│   │   ├── web_tools.py           LLM tool schema: web_crawl
+│   │   ├── search_tools.py        LLM tool schema: google_search (Serper.dev)
+│   │   └── places_tools.py        LLM tool schema: search_places (Google Places API)
+│   │
+│   └── outsourcing/               IT outsourcing department
+│       ├── director.py            DirectorAgent — evaluate, proposal chain, execute on approval
+│       ├── agents.py              PMAgent, CRMAgent, SalesAgent (gpt-4o-mini wrappers)
+│       ├── scraper.py             JobScraper — Toptal + Upwork fetch, dedup
+│       ├── job_store.py           aiosqlite CRUD: job_listings + proposal_briefs
+│       ├── profile.py             OutsourcingProfile — load/save/update
+│       ├── outsourcing_tools.py   LLM tool schemas + OutsourcingToolHandler
+│       ├── portals/
+│       │   ├── toptal.py          Toptal URL patterns, auth detection
+│       │   └── upwork.py          Upwork RSS + crawl fallback
+│       └── workers/
+│           ├── base.py            WorkerResult, BaseWorker ABC, subprocess runner
+│           ├── claude_worker.py   `claude --print` subprocess
+│           ├── codex_worker.py    `codex --full-auto` subprocess
+│           └── pool.py            WorkerPool — tries Claude, falls back to Codex
 │
-└── jarvis_tasks.db                SQLite — task definitions + run history (gitignored)
+├── jarvis_tasks.db                SQLite — task definitions + run history (gitignored)
+└── outsourcing.db                 SQLite — job listings + proposal briefs (gitignored)
 ```
 
 ---

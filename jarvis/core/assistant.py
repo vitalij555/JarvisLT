@@ -17,6 +17,7 @@ from jarvis.llm.claude_client import LLMClient
 from jarvis.llm.memory import ConversationMemory
 from jarvis.memory.memory_manager import MemoryManager
 from jarvis.memory.memory_tools import MEMORY_TOOLS, MemoryToolHandler
+from jarvis.outsourcing.outsourcing_tools import OUTSOURCING_TOOLS, OutsourcingToolHandler
 from jarvis.scheduler.task_runner import TaskRunner
 from jarvis.scheduler.task_tools import TASK_TOOLS, TaskToolHandler
 
@@ -94,6 +95,15 @@ class Assistant:
         self.llm.register_local_tools(SEARCH_TOOLS, SearchToolHandler())
         self.llm.register_local_tools(PLACES_TOOLS, PlacesToolHandler())
 
+        self.pending_notifications: asyncio.Queue = asyncio.Queue()
+        outsourcing_cfg = config.get("outsourcing", {})
+        if outsourcing_cfg.get("enabled", False):
+            outsourcing_handler = OutsourcingToolHandler(
+                outsourcing_cfg, self.llm, self.pending_notifications
+            )
+            self.llm.register_local_tools(OUTSOURCING_TOOLS, outsourcing_handler)
+            logger.info("Outsourcing department enabled")
+
     async def run(self) -> None:
         """Main loop: wake word → listen → think → speak → repeat."""
         await self.llm.start()
@@ -139,6 +149,19 @@ class Assistant:
                     )
 
                     await self.speaker.speak(response)
+
+                    # Announce any background notifications (e.g. new job opportunities)
+                    while not self.pending_notifications.empty():
+                        note = self.pending_notifications.get_nowait()
+                        if note["type"] == "opportunity":
+                            await self.speaker.speak(
+                                f"By the way, I found a promising job. "
+                                f"{note['preview']}. Say 'show opportunities' to review."
+                            )
+                        elif note["type"] == "auth_required":
+                            await self.speaker.speak(
+                                f"{note['portal'].capitalize()} requires login for job scanning."
+                            )
 
                     # Switch to long timeout for follow-ups
                     current_timeout = self._conversation_timeout
