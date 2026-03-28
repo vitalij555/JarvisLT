@@ -1,0 +1,47 @@
+services:
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    # For NVIDIA GPU, replace above with:
+    # image: ghcr.io/speaches-ai/speaches:latest-cuda
+    container_name: jarvis-speaches
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - speaches_models:/home/ubuntu/.cache/huggingface/hub
+    # For GPU, uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  whisper:
+    image: rhasspy/wyoming-whisper
+    container_name: jarvis-whisper
+    restart: unless-stopped
+    ports:
+      - "10300:10300"
+    volumes:
+      - whisper_models:/data
+    command: --uri tcp://0.0.0.0:10300 --model tiny-int8 --language en
+
+  openwakeword:
+    image: rhasspy/wyoming-openwakeword
+    container_name: jarvis-openwakeword
+    restart: unless-stopped
+    ports:
+      - "10400:10400"
+    volumes:
+      - openwakeword_models:/data
+    command: --uri tcp://0.0.0.0:10400 --preload-model hey_jarvis
+
+volumes:
+  speaches_models:
+    driver: local
+  whisper_models:
+    driver: local
+  openwakeword_models:
+    driver: local

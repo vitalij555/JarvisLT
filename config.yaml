@@ -1,0 +1,61 @@
+wyoming:
+  stt_uri: "tcp://localhost:10300"
+  wake_uri: "tcp://localhost:10400"
+  # Wake word name — must match a model loaded by wyoming-openwakeword
+  # Run: wyoming-openwakeword --list-models to see available names
+  wake_word: "hey_jarvis"
+
+speaches:
+  base_url: "http://localhost:8000"
+  tts_model: "speaches-ai/Kokoro-82M-v1.0-ONNX"
+  tts_voice: "af_heart" # Other options: af_sky, am_adam, bf_emma, bm_george, etc.
+  # Used only if wyoming STT is unavailable (fallback path)
+  stt_model: "Systran/faster-whisper-small"
+
+audio:
+  sample_rate: 16000 # Hz — must match Wyoming server expectations
+  channels: 1 # mono
+  chunk_ms: 100 # milliseconds per audio chunk sent to Wyoming
+  silence_threshold: 200 # RMS below this = silence (tune for your microphone)
+  silence_duration: 1.5 # seconds of silence before ending speech capture
+
+llm:
+  model: "gpt-4o"
+  max_tokens: 1024
+  system_prompt: |
+    You are Jarvis, a helpful personal voice assistant.
+    Keep responses concise — they will be spoken aloud.
+    Use available tools when you need real-time information or to take actions.
+    When using tools, don't narrate the tool call, just use it and report the result.
+
+memory:
+  max_turns: 20 # max user+assistant turn pairs to keep in context
+  persist_path: "conversation_history.json"
+
+home_assistant:
+  url: "http://homeassistant.local:8123"
+  # Token is read from HA_TOKEN env var; leave blank here
+  token: ""
+  enabled: true
+
+mcp_servers:
+  # Uncomment and configure to enable MCP tool servers.
+  # Each entry: command + args to launch the MCP server subprocess.
+  # Claude will automatically discover and use their tools.
+
+  # GitHub: read repos, issues, PRs, notifications
+  # github:
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-github"]
+  #   env:
+  #     GITHUB_PERSONAL_ACCESS_TOKEN: ""  # or set in .env
+
+  # Google Workspace: Gmail, Calendar, Drive, Docs
+  google_workspace:
+    command: "uvx"
+    args: ["mcp-gsuite"]
+
+  # Filesystem access
+  # filesystem:
+  #   command: "npx"
+  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]

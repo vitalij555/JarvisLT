@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+conversation_history.json
+.gauth.json
+.oauth2.*.json
+.accounts.json
+__pycache__/
+*.py[cod]
+.venv/
+dist/
+*.egg-info/
+.DS_Store
+Pipfile.lock

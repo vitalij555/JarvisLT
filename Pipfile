@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+openai = ">=1.0.0"
+oauth2client = "*"
+google-api-python-client = "*"
+wyoming = ">=1.5.0"
+httpx = ">=0.27.0"
+sounddevice = ">=0.5.0"
+numpy = ">=1.26.0"
+homeassistant-api = ">=4.0.0"
+pyyaml = ">=6.0"
+python-dotenv = ">=1.0.0"
+mcp = ">=1.0.0"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"
