@@ -146,7 +146,28 @@ class Assistant:
                     logger.info("User said: %r", text)
                     self.memory.add_turn("user", text)
 
-                    response = await self.llm.chat_async(text, self.memory)
+                    # Auto-recall: search long-term memory for context relevant to
+                    # this request and inject it before the LLM sees the message.
+                    # The raw `text` is stored in conversation history; only the
+                    # enriched version is sent to the LLM — no history pollution.
+                    try:
+                        recall = await self.memory_manager.recall_about(text)
+                        _no_result = recall.startswith("I don't have")
+                    except Exception:
+                        recall = ""
+                        _no_result = True
+
+                    if recall and not _no_result:
+                        llm_input = (
+                            f"[Relevant memory — use if helpful for this request]\n"
+                            f"{recall}\n\n"
+                            f"[User request]\n{text}"
+                        )
+                        logger.debug("Auto-recall injected %d chars of memory context", len(recall))
+                    else:
+                        llm_input = text
+
+                    response = await self.llm.chat_async(llm_input, self.memory)
                     logger.info("Jarvis: %r", response)
 
                     self.memory.add_turn("assistant", response)
