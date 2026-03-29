@@ -14,9 +14,9 @@ speaches:
   # Languages not supported by Kokoro are routed to Microsoft edge-tts (free, neural quality).
   # Run: python -m edge_tts --list-voices | grep -E "^lt|^pl|^ru" to see all options.
   multilingual_voices:
-    lt: "lt-LT-OnaNeural"       # Lithuanian female
-    pl: "pl-PL-ZofiaNeural"     # Polish female
-    ru: "ru-RU-SvetlanaNeural"  # Russian female
+    lt: "lt-LT-OnaNeural" # Lithuanian female
+    pl: "pl-PL-ZofiaNeural" # Polish female
+    ru: "ru-RU-SvetlanaNeural" # Russian female
 
 audio:
   sample_rate: 16000 # Hz — must match Wyoming server expectations
@@ -24,7 +24,7 @@ audio:
   chunk_ms: 100 # milliseconds per audio chunk sent to Wyoming
   silence_threshold: 100 # RMS below this = silence (tune for your microphone; lower = more sensitive)
   silence_duration: 1.5 # seconds of silence before ending speech capture
-  speech_timeout: 8.0   # seconds to wait for first speech after "Yes?" before giving up
+  speech_timeout: 8.0 # seconds to wait for first speech after "Yes?" before giving up
   conversation_timeout: 60.0 # seconds to wait for a follow-up before going back to sleep
 
 llm:
@@ -66,7 +66,9 @@ llm:
       "write a script that does W in folder F", or similar: call dev_team_build with the
       request and the folder path. The team works in the background — confirm immediately
       with "Got it, I'll let you know when they're done" and nothing more.
-    - If the user doesn't specify a folder, ask: "Which folder should I build it in?"
+    - If the user doesn't specify a folder: first call memory_recall("project folder default")
+      to check if the user has stored a preferred project root. If found, use it and create
+      a subfolder named after the project. If not found, ask: "Which folder should I build it in?"
     - When the user asks about build status, call dev_team_status.
     - Do not attempt to implement code yourself when this tool is available.
 
@@ -109,9 +111,9 @@ mcp_servers:
     args: ["mcp-gsuite"]
 
   # Filesystem access
-  # filesystem:
-  #   command: "npx"
-  #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
 
   # Playwright browser — interactive JS-aware web browsing (navigate, snapshot, click, fill forms)
   # One-time setup: npx playwright install chromium
@@ -123,7 +125,7 @@ mcp_servers:
 neo4j:
   uri: "bolt://localhost:7687"
   user: "neo4j"
-  password: ""  # set NEO4J_PASSWORD in .env (overrides this)
+  password: "" # set NEO4J_PASSWORD in .env (overrides this)
 
 # ChromaDB vector memory
 memory_db:
@@ -136,8 +138,8 @@ task_db:
 # Local AI Dev Team — voice-triggered background coding agent
 dev_team:
   enabled: true
-  worker_timeout: 600       # seconds per CLI worker call (architects/devs may need time)
-  max_retries: 4            # test-fix iterations before declaring failure
+  worker_timeout: 600 # seconds per CLI worker call (architects/devs may need time)
+  max_retries: 4 # test-fix iterations before declaring failure
   db_path: "jarvis_tasks.db"
 
 # IT Outsourcing Department — autonomous job scanning and proposal pipeline
@@ -145,9 +147,9 @@ outsourcing:
   enabled: true
   profile_path: "outsourcing_profile.json"
   db_path: "outsourcing.db"
-  min_score: 7                  # 0-10 — listings below this are skipped
-  max_evaluations_per_day: 20   # cost guard (gpt-4o-mini calls)
-  worker_timeout: 300           # seconds for claude/codex CLI subprocess calls
+  min_score: 7 # 0-10 — listings below this are skipped
+  max_evaluations_per_day: 20 # cost guard (gpt-4o-mini calls)
+  worker_timeout: 300 # seconds for claude/codex CLI subprocess calls
   portals:
     toptal:
       enabled: true
